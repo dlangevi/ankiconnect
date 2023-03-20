@@ -1,10 +1,17 @@
 package ankiconnect
 
-import "github.com/privatesquare/bkst-go-utils/utils/errors"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+
+	"github.com/privatesquare/bkst-go-utils/utils/errors"
+)
 
 const (
-	ActionFindCards = "findCards"
-	ActionCardsInfo = "cardsInfo"
+	ActionFindCards         = "findCards"
+	ActionCardsInfo         = "cardsInfo"
+	ActionGetReviewsOfCards = "getReviewsOfCards"
 )
 
 type (
@@ -12,6 +19,9 @@ type (
 	CardsManager interface {
 		Search(query string) (*[]int64, *errors.RestErr)
 		Get(query string) (*[]ResultCardsInfo, *errors.RestErr)
+		// Note that the current released anki-connect api does not yet support this
+		// api call https://github.com/FooSoft/anki-connect/issues/378
+		GetReviews(query string) (*ResultGetReviews, *errors.RestErr)
 	}
 
 	// notesManager implements NotesManager.
@@ -48,7 +58,36 @@ type (
 	ParamsCardsInfo struct {
 		Cards *[]int64 `json:"cards,omitempty"`
 	}
+
+	ResultGetReviews map[int64][]ReviewData
+
+	ReviewData struct {
+		ID       int64 `json:"id"`
+		USN      int64 `json:"usn"`
+		Ease     int64 `json:"ease"`
+		Interval int64 `json:"ivl"`
+		LastIvl  int64 `json:"lastIvl"`
+		Factor   int64 `json:"factor"`
+		Time     int64 `json:"time"`
+		Type     int64 `json:"type"`
+	}
 )
+
+func (m *ResultGetReviews) UnmarshalJSON(data []byte) error {
+	tmp := make(map[string][]ReviewData)
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*m = ResultGetReviews{}
+	for k, v := range tmp {
+		i, err := strconv.ParseInt(k, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid key %q: %s", k, err)
+		}
+		(*m)[i] = v
+	}
+	return nil
+}
 
 func (cm *cardsManager) Search(query string) (*[]int64, *errors.RestErr) {
 	findParams := ParamsFindCards{
@@ -66,4 +105,17 @@ func (cm *cardsManager) Get(query string) (*[]ResultCardsInfo, *errors.RestErr) 
 		Cards: cardIds,
 	}
 	return post[[]ResultCardsInfo](cm.Client, ActionCardsInfo, &infoParams)
+}
+
+func (cm *cardsManager) GetReviews(query string) (
+	*ResultGetReviews, *errors.RestErr) {
+	cardIds, restErr := cm.Search(query)
+	if restErr != nil {
+		return nil, restErr
+	}
+	getReviewsParams := ParamsCardsInfo{
+		Cards: cardIds,
+	}
+	return post[ResultGetReviews](
+		cm.Client, ActionGetReviewsOfCards, &getReviewsParams)
 }
